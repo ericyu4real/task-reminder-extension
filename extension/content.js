@@ -6,8 +6,13 @@
   const DEFAULT_POSITION = { top: 12, right: 12 };
   const DRAG_THRESHOLD_PX = 4;
 
-  // A copy left behind by a previous (reloaded) version of the extension.
-  document.getElementById(HOST_ID)?.remove();
+  // Copies left behind by a previous (reloaded) version of the extension. Their scripts may still be
+  // running and re-attach them when removed, so hide and rename them before removing.
+  for (const stale of document.querySelectorAll(`#${HOST_ID}`)) {
+    stale.id = `${HOST_ID}-stale`;
+    stale.style.setProperty('display', 'none', 'important');
+    stale.remove();
+  }
 
   const CSS = `
     .wrap {
@@ -145,6 +150,7 @@
 
   function render() {
     if (tornDown) return;
+    if (!extensionAlive()) return teardown();
     ensureAttached();
     const { task, collapsed, position } = state;
     if (!task) {
@@ -327,7 +333,9 @@
 
   // Some single-page apps replace the root's children; re-attach if we get removed.
   const observer = new MutationObserver(() => {
-    if (!host.isConnected && !tornDown) ensureAttached();
+    if (host.isConnected || tornDown) return;
+    if (extensionAlive()) ensureAttached();
+    else teardown();
   });
   observer.observe(document.documentElement, { childList: true });
 
