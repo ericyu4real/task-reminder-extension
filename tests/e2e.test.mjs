@@ -29,6 +29,7 @@ async function launch() {
     userDataDir,
     pipe: true,
     enableExtensions: [EXTENSION_PATH],
+    args: ['--enable-unsafe-extension-debugging'], // lets tests reload the extension
     defaultViewport: { width: 1000, height: 700 },
   });
   const worker = await browser.waitForTarget(
@@ -341,4 +342,34 @@ test('the task and bar position survive a browser restart', async () => {
   assert.equal(await popupAgain.$eval('#current-title', (el) => el.textContent), 'Review algorithms');
   await popupAgain.close();
   await after.close();
+});
+
+test('reloading the extension leaves exactly one bar in already-open tabs', async () => {
+  const visibleHosts = (page) => page.evaluate(() =>
+    [...document.querySelectorAll('[id^="task-reminder-ext-root"]')]
+      .filter((h) => getComputedStyle(h).display !== 'none').length);
+
+  const page = await openPage('before-extension-reload');
+  const popup = await openPopup();
+  await popup.evaluate(() => chrome.storage.local.set({ position: null, collapsed: true }));
+  await popup.close();
+  await waitForOverlay(page, (o) => showsPill(o) && o.top === 12, 'collapsed before reload');
+
+  // Reinstalling an unpacked extension from the same folder is what the reload button does.
+  await browser.installExtension(EXTENSION_PATH);
+  await new Promise((r) => setTimeout(r, 1500));
+
+  const popupAfter = await openPopup();
+  await popupAfter.evaluate(() => chrome.storage.local.set({ position: { top: 200, right: 300 }, collapsed: false }));
+  await popupAfter.close();
+
+  await page.bringToFront();
+  await waitForOverlay(page, (o) => showsTask('Review algorithms')(o) && o.top === 200 && o.rightGap === 300,
+    'new bar follows the new position');
+  assert.equal(await visibleHosts(page), 1, 'the previous version left a visible copy behind');
+
+  await drag(page, '.bar', -50, 50);
+  await waitForOverlay(page, at(250, 350), 'dragged after reload');
+  assert.equal(await visibleHosts(page), 1);
+  await page.close();
 });
