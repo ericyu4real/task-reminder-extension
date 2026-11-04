@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "任务提醒",
-  "version": "0.1.0",
-  "description": "在网页右上角持续提醒你当前正在做的任务。",
+  "name": "Task Reminder",
+  "version": "0.2.0",
+  "description": "Keeps your current task pinned to the corner of every web page.",
   "permissions": ["storage", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "service-worker.js" },
@@ -12,7 +12,7 @@
     "run_at": "document_idle"
   }],
   "action": {
-    "default_title": "任务提醒：点击设置当前任务",
+    "default_title": "Task Reminder: click to set your current task",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
