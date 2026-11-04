@@ -1,0 +1,58 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  width: 300px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #1c1c1e;
+  background: #fff;
+}
+
+main { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+
+[hidden] { display: none !important; }
+
+.caption { margin: 0; color: #8e8e93; font-size: 12px; }
+
+#current-title {
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+#form { display: flex; gap: 6px; }
+
+#title {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid #d1d1d6;
+  border-radius: 7px;
+  font: inherit;
+  outline: none;
+}
+#title:focus { border-color: #0a84ff; }
+
+button {
+  font: inherit;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+#submit { padding: 7px 14px; background: #0a84ff; color: #fff; }
+#submit:hover { background: #0071e3; }
+
+#actions { display: flex; gap: 8px; align-items: center; }
+
+#complete { padding: 6px 12px; background: #e8f5ec; color: #1a7f37; }
+#complete:hover { background: #d4eddc; }
+
+.link { padding: 6px 4px; background: none; color: #0a84ff; }
+
+.error { margin: 0; color: #d70015; font-size: 12px; }
+
+.hint { margin: 0; color: #aeaeb2; font-size: 11px; }

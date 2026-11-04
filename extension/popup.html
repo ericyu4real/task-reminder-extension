@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>任务提醒</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main>
+    <section id="current" hidden>
+      <div class="caption">正在做</div>
+      <div id="current-title"></div>
+    </section>
+    <p id="empty" class="caption">当前没有任务</p>
+
+    <form id="form">
+      <input id="title" type="text" maxlength="200" placeholder="接下来要做什么？" autocomplete="off" autofocus />
+      <button id="submit" type="submit">开始</button>
+    </form>
+    <p id="error" class="error" hidden></p>
+
+    <div id="actions" hidden>
+      <button id="complete" type="button">完成任务</button>
+      <button id="expand" type="button" class="link" hidden>展开网页浮条</button>
+    </div>
+
+    <p class="hint">浮条显示在普通网页右上角。Chrome 内部页面不显示浮条，可以在这里管理任务。</p>
+  </main>
+  <script src="store.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
