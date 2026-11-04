@@ -25,8 +25,8 @@ async function render() {
   els.actions.hidden = !task;
   els.expand.hidden = !collapsed;
   els.currentTitle.textContent = task?.title ?? '';
-  els.submit.textContent = task ? '修改' : '开始';
-  els.title.placeholder = task ? '修改任务名称' : '接下来要做什么？';
+  els.submit.textContent = task ? 'Update' : 'Start';
+  els.title.placeholder = task ? 'Rename the task' : 'What are you working on?';
 
   const title = task?.title ?? '';
   if (title !== lastRenderedTitle) {
@@ -39,7 +39,7 @@ els.form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const title = TaskStore.normalizeTitle(els.title.value);
   if (!title) {
-    showError('请输入任务名称');
+    showError('Enter a task name');
     els.title.focus();
     return;
   }

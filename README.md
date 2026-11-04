@@ -1,76 +1,84 @@
-# 任务提醒（Chrome 扩展）
+# Task Reminder (Chrome extension)
 
-在每个普通网页的右上角显示一个小悬浮条：“正在做：任务名称”，持续提醒你当前在做什么。
+Shows a small floating bar — "Working on: *your task*" — in the corner of every regular web page, so you always remember what you sat down to do.
 
-- 一次只有一个当前任务。
-- 点击浏览器工具栏里的扩展图标输入任务，点“开始”。
-- 悬浮条固定在视口右上角，滚动时保持可见。
-- 点击悬浮条可以 **修改任务 / 完成任务 / 收起**。收起后右上角留一个小圆点，点它可以重新展开。
-- 任务和收起状态保存在 `chrome.storage.local`，所有标签页实时同步；刷新、新开标签页、重启浏览器后仍然保留。
-- 没有任务时页面上什么都不显示。
-- Chrome 内部页面（`chrome://`、新标签页、Chrome 网上应用店等）无法注入悬浮条，在扩展图标里管理任务即可。有任务时扩展图标上会显示一个绿色小圆点。
+![The bar on a page](docs/bar.png)
 
-数据只保存在本机，不需要账号，也不联网。
+## Features
 
-## 安装（加载已解压的扩展程序）
+- One current task at a time. No lists.
+- Set the task from the toolbar icon: type it and press **Start**.
+- The bar stays fixed in the viewport while you scroll, and is styled to stay out of the way.
+- **Drag the bar anywhere.** The position is remembered and shared across tabs. It can't be dragged off-screen, and **Reset position** in the bar's menu puts it back in the top-right corner.
+- Click the bar to **Edit task**, **Complete task**, or **Collapse** it. Collapsed, it leaves a small dot you can click to expand again.
+- The task, collapsed state and position are stored in `chrome.storage.local` and sync live across all tabs. They survive page reloads, new tabs and browser restarts.
+- With no task, nothing is shown on pages.
+- Chrome's internal pages (`chrome://` pages, the New Tab page, the Chrome Web Store) can't show the bar; manage the task from the toolbar icon there. The icon shows a small green dot while a task is active.
 
-1. 打开 Chrome，地址栏输入 `chrome://extensions` 并回车。
-2. 打开右上角的 **开发者模式**。
-3. 点击 **加载已解压的扩展程序**。
-4. 选择本仓库里的 **`extension`** 文件夹：`task-reminder-extension/extension`
-   （注意选 `extension` 子文件夹，不是仓库根目录。）
-5. 点击工具栏的拼图图标，把“任务提醒”固定到工具栏，方便点击。
+Everything stays on your machine: no account, no backend, no network requests.
 
-安装时已经打开的网页会被自动注入悬浮条，不需要刷新。
+## Install (load unpacked)
 
-可选：如果希望本地 `file://` 文件里也显示悬浮条，在 `chrome://extensions` 的扩展详情里打开“允许访问文件网址”。
+1. Open `chrome://extensions` in Chrome.
+2. Turn on **Developer mode** (top-right).
+3. Click **Load unpacked** and select the **`extension`** folder in this repository (`task-reminder-extension/extension`), not the repository root.
+4. Click the puzzle-piece icon in the toolbar and pin **Task Reminder**.
 
-### 修改代码后更新
+Tabs that were already open when you install get the bar without a refresh.
 
-在 `chrome://extensions` 里点扩展卡片上的刷新按钮。已经打开的网页会自动换成新版本的悬浮条。
+Optional: to show the bar on local `file://` pages, open the extension's **Details** and enable **Allow access to file URLs**.
 
-## 使用
+### Updating after code changes
 
-| 操作 | 方式 |
+Click the reload arrow on the Task Reminder card in `chrome://extensions`. There's no need to remove and re-add it.
+
+## Usage
+
+| Action | How |
 | --- | --- |
-| 开始任务 | 点击扩展图标，输入任务，按回车或点“开始” |
-| 修改任务 | 点击悬浮条，选“修改任务”；或在扩展图标弹窗里改名后点“修改” |
-| 完成任务 | 点击悬浮条，选“完成任务”；或在弹窗里点“完成任务” |
-| 收起 / 展开 | 点击悬浮条，选“收起”；点右上角小圆点展开（弹窗里也有“展开网页浮条”） |
-| 关闭菜单 | 按 Esc 或点击页面其他地方 |
+| Start a task | Click the toolbar icon, type the task, press Enter or **Start** |
+| Rename the task | Click the bar → **Edit task**, or rename it in the popup and click **Update** |
+| Complete the task | Click the bar → **Complete task**, or **Complete task** in the popup |
+| Move the bar | Drag it (or the collapsed dot) |
+| Reset the position | Click the bar → **Reset position** |
+| Collapse / expand | Click the bar → **Collapse**; click the dot to expand (or **Show bar on pages** in the popup) |
+| Close the menu | Press Esc or click anywhere else on the page |
 
-## 文件结构
+## Project layout
 
 ```
-extension/          # 加载到 Chrome 的扩展本体
+extension/              # The unpacked extension that Chrome loads
   manifest.json
-  store.js          # 任务读写（popup、内容脚本、后台共用）
-  content.js        # 网页右上角悬浮条（Shadow DOM，不受网页样式影响）
-  popup.html/.css/.js
-  service-worker.js # 图标角标；安装时注入已打开的标签页
+  store.js              # Task state in chrome.storage (shared by popup, page script, service worker)
+  content.js            # The floating bar (Shadow DOM, isolated from page styles)
+  popup.html/.css/.js   # Toolbar popup
+  service-worker.js     # Toolbar badge; injects the bar into already-open tabs on install
   icons/
-scripts/make-icons.mjs  # 生成图标 PNG（无依赖）
-tests/e2e.test.mjs      # 端到端测试
+scripts/make-icons.mjs  # Regenerates the icon PNGs (no dependencies)
+tests/e2e.test.mjs      # End-to-end tests
+docs/                   # Screenshots
 ```
 
-## 测试
+## Testing
 
-测试会用 Puppeteer 启动 Chrome for Testing（正式版 Chrome 已不支持命令行加载扩展），加载 `extension/`，再用本地网页模拟真实操作。
+The tests use Puppeteer to launch Chrome for Testing (branded Chrome no longer allows loading extensions from the command line), load `extension/`, serve local test pages and drive the extension with real mouse and keyboard input. They use a temporary browser profile and never touch your own Chrome.
 
 ```bash
 npm install
-npx puppeteer browsers install chrome   # 首次需要
+npx puppeteer browsers install chrome   # first time only
 npm test
 ```
 
-覆盖的场景：
+What's covered:
 
-- 无任务时网页不显示浮条，弹窗显示空状态；空任务名被拒绝。
-- 弹窗开始任务后，已打开的两个标签页和新开的标签页都显示“正在做：…”，图标角标出现。
-- 页面滚动 3000px 后浮条仍在视口右上角（距顶部、右侧各 12px）。
-- 在标签页 A 的浮条里改名，标签页 B 和弹窗同步更新；在输入框打字不会触发网页自身的快捷键。
-- Esc 和点击页面其他位置会关闭菜单。
-- 在 B 收起，A 也收起成小圆点；在 A 点小圆点展开，B 也展开。
-- 刷新页面后任务仍在。
-- 在浮条或弹窗里完成任务，所有标签页的浮条消失，角标清除。
-- 关闭并用同一个用户目录重启浏览器后，任务仍在。
+- No task: pages show nothing and the popup shows the empty state; empty task names are rejected.
+- Starting a task from the popup shows the bar in two open tabs and in a newly opened tab, and sets the toolbar badge.
+- After scrolling 3000px the bar is still 12px from the top and right edges.
+- Renaming in tab A updates tab B and the popup; typing in the bar's editor doesn't trigger the page's own keyboard handlers.
+- Esc and clicking elsewhere close the menu.
+- Dragging moves the bar without opening the menu, saves the position and moves it in other tabs; a plain click still opens the menu afterwards.
+- The bar can't be dragged out of the viewport, and the open menu stays on screen near the bottom edge.
+- Collapsing in tab B collapses tab A, the dot keeps the dragged position, and clicking it expands both.
+- Reloading a page keeps the task and position; **Reset position** returns the bar to the corner in every tab.
+- Completing from the bar or the popup hides it everywhere and clears the badge.
+- The task and position survive closing and relaunching the browser with the same profile.

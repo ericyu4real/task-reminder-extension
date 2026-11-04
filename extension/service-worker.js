@@ -4,7 +4,9 @@ async function refreshAction() {
   const { task } = await TaskStore.get();
   await chrome.action.setBadgeBackgroundColor({ color: '#34C759' });
   await chrome.action.setBadgeText({ text: task ? '•' : '' });
-  await chrome.action.setTitle({ title: task ? `正在做：${task.title}` : '任务提醒：点击设置当前任务' });
+  await chrome.action.setTitle({
+    title: task ? `Working on: ${task.title}` : 'Task Reminder: click to set your current task',
+  });
 }
 
 // Manifest content scripts only reach pages loaded after install, so inject into tabs that are already open.
