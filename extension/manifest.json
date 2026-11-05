@@ -12,7 +12,7 @@
     "run_at": "document_idle"
   }],
   "action": {
-    "default_title": "Task Reminder: click to set your current task",
+    "default_title": "Task Reminder: click to show or hide the widget",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",

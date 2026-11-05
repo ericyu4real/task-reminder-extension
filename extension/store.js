@@ -4,8 +4,8 @@ var TaskStore = globalThis.TaskStore || (() => {
   const MAX_TITLE_LENGTH = 200;
   const MAX_TASKS = 50;
   // `task` is the single-task format used before 0.3.0; it is migrated into `tasks`.
-  const DEFAULTS = { tasks: null, task: null, collapsed: false, position: null };
-  const WATCHED_KEYS = ['tasks', 'task', 'collapsed', 'position'];
+  const DEFAULTS = { tasks: null, task: null, collapsed: false, position: null, enabled: true };
+  const WATCHED_KEYS = ['tasks', 'task', 'collapsed', 'position', 'enabled'];
 
   function normalizeTitle(value) {
     return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_TITLE_LENGTH);
@@ -47,6 +47,7 @@ var TaskStore = globalThis.TaskStore || (() => {
       tasks: normalizeTasks(state.tasks, state.task),
       collapsed: !!state.collapsed,
       position: normalizePosition(state.position),
+      enabled: state.enabled !== false,
     };
   }
 
@@ -112,6 +113,10 @@ var TaskStore = globalThis.TaskStore || (() => {
     await chrome.storage.local.set({ collapsed: !!collapsed });
   }
 
+  async function setEnabled(enabled) {
+    await chrome.storage.local.set({ enabled: !!enabled });
+  }
+
   // Position is the widget's offset from the top and right edges of the viewport, in CSS pixels.
   async function setPosition(position) {
     await chrome.storage.local.set({ position: normalizePosition(position) });
@@ -141,6 +146,7 @@ var TaskStore = globalThis.TaskStore || (() => {
     moveTask,
     migrateLegacy,
     setCollapsed,
+    setEnabled,
     setPosition,
     resetPosition,
     onChange,

@@ -164,7 +164,7 @@
   const resetPositionItem = $('[data-action="reset-position"]');
   const pill = $('.pill');
 
-  let state = { tasks: [], collapsed: false, position: null };
+  let state = { tasks: [], collapsed: false, position: null, enabled: true };
   let open = false;
   let editingId = null;
   let editDraft = '';
@@ -295,10 +295,16 @@
     if (tornDown) return;
     if (!extensionAlive()) return teardown();
     ensureAttached();
-    const { tasks, collapsed, position } = state;
+    const { tasks, collapsed, position, enabled } = state;
     const current = tasks[0];
     if (editingId && !tasks.some((t) => t.id === editingId)) editingId = null;
 
+    if (!enabled) {
+      open = false;
+      editingId = null;
+      host.style.setProperty('display', 'none', 'important');
+      return;
+    }
     host.style.setProperty('display', 'block', 'important');
     // With no tasks the widget shrinks to an empty marker; "collapsed" only applies to a real task.
     const showPill = !current || collapsed;

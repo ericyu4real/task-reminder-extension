@@ -7,25 +7,27 @@
 </head>
 <body>
   <main>
-    <section id="current" hidden>
-      <div class="caption">Working on</div>
-      <div id="current-title"></div>
-      <div id="queued" class="caption" hidden></div>
+    <header>
+      <img src="icons/icon32.png" width="18" height="18" alt="" />
+      <h1>Task Reminder</h1>
+    </header>
+
+    <section id="status" class="status">
+      <div id="caption" class="caption">Working on</div>
+      <div id="current-title" class="current"></div>
+      <div id="queued" class="queued"></div>
     </section>
-    <p id="empty" class="caption">No current task</p>
 
-    <form id="form">
-      <input id="title" type="text" maxlength="200" placeholder="What are you working on?" autocomplete="off" autofocus />
-      <button id="submit" type="submit">Start</button>
-    </form>
-    <p id="error" class="error" hidden></p>
+    <label class="toggle">
+      <span class="toggle-text">
+        <span class="toggle-title">Show widget on pages</span>
+        <span id="toggle-state" class="toggle-state"></span>
+      </span>
+      <input id="enabled" type="checkbox" role="switch" />
+      <span class="switch" aria-hidden="true"><span class="thumb"></span></span>
+    </label>
 
-    <div id="actions" hidden>
-      <button id="complete" type="button">Complete task</button>
-      <button id="expand" type="button" class="link" hidden>Show bar on pages</button>
-    </div>
-
-    <p class="hint">Click the bar on any page to see the queue, edit, reorder or remove tasks. Chrome's internal pages can't show it.</p>
+    <p id="hint" class="hint"></p>
   </main>
   <script src="store.js"></script>
   <script src="popup.js"></script>

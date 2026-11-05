@@ -1,67 +1,36 @@
 const els = {
-  current: document.getElementById('current'),
+  status: document.getElementById('status'),
+  caption: document.getElementById('caption'),
   currentTitle: document.getElementById('current-title'),
   queued: document.getElementById('queued'),
-  empty: document.getElementById('empty'),
-  form: document.getElementById('form'),
-  title: document.getElementById('title'),
-  submit: document.getElementById('submit'),
-  error: document.getElementById('error'),
-  actions: document.getElementById('actions'),
-  complete: document.getElementById('complete'),
-  expand: document.getElementById('expand'),
+  enabled: document.getElementById('enabled'),
+  toggleState: document.getElementById('toggle-state'),
+  hint: document.getElementById('hint'),
 };
 
-function showError(message) {
-  els.error.textContent = message;
-  els.error.hidden = !message;
-}
-
 async function render() {
-  const { tasks, collapsed } = await TaskStore.get();
+  const { tasks, enabled } = await TaskStore.get();
   const current = tasks[0];
-  const more = tasks.length - 1;
-  els.current.hidden = !current;
-  els.empty.hidden = !!current;
-  els.actions.hidden = !current;
-  els.expand.hidden = !collapsed;
+  const more = Math.max(0, tasks.length - 1);
+
+  els.status.classList.toggle('empty', !current);
+  els.status.classList.toggle('off', !enabled);
+  els.caption.textContent = current ? 'Working on' : 'No current task';
   els.currentTitle.textContent = current?.title ?? '';
   els.queued.textContent = more > 0 ? `${more} more in the queue` : '';
-  els.queued.hidden = more <= 0;
-  els.submit.textContent = current ? 'Add' : 'Start';
-  els.title.placeholder = current ? 'Add another task' : 'What are you working on?';
+  els.enabled.checked = enabled;
+  els.toggleState.textContent = enabled ? 'On' : 'Off';
+
+  if (!enabled) {
+    els.hint.textContent = 'The widget is hidden. Turn it on to see your tasks on pages.';
+  } else if (!current) {
+    els.hint.textContent = 'Click the marker on any page to add a task. Chrome’s internal pages can’t show it.';
+  } else {
+    els.hint.textContent = 'Click the bar on any page to add, edit, reorder or complete tasks.';
+  }
 }
 
-els.form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const title = TaskStore.normalizeTitle(els.title.value);
-  if (!title) {
-    showError('Enter a task name');
-    els.title.focus();
-    return;
-  }
-  showError('');
-  try {
-    await TaskStore.addTask(title);
-  } catch (error) {
-    showError(error.message);
-    return;
-  }
-  els.title.value = '';
-  await render();
-  els.title.focus();
-});
-
-els.title.addEventListener('input', () => showError(''));
-
-els.complete.addEventListener('click', async () => {
-  await TaskStore.completeCurrent();
-  await render();
-  els.title.focus();
-});
-
-els.expand.addEventListener('click', () => TaskStore.setCollapsed(false));
+els.enabled.addEventListener('change', () => TaskStore.setEnabled(els.enabled.checked));
 
 TaskStore.onChange(render);
-
-render().then(() => els.title.focus());
+render();

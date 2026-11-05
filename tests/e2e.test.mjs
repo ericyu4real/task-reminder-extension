@@ -160,12 +160,25 @@ after(async () => {
   fs.rmSync(userDataDir, { recursive: true, force: true });
 });
 
-test('no tasks: pages show only the empty marker, popup shows empty state', async () => {
+async function popupStatus(popup) {
+  return popup.evaluate(() => ({
+    caption: document.getElementById('caption').textContent,
+    title: document.getElementById('current-title').textContent,
+    queued: document.getElementById('queued').textContent,
+    enabled: document.getElementById('enabled').checked,
+    state: document.getElementById('toggle-state').textContent,
+    empty: document.getElementById('status').classList.contains('empty'),
+    off: document.getElementById('status').classList.contains('off'),
+  }));
+}
+
+test('no tasks: pages show only the empty marker, popup is off-idle', async () => {
   const page = await openPage('a');
   await waitForOverlay(page, (s) => showsEmpty(s) && !s.panel && s.top === 12 && s.rightGap === 12, 'empty page');
   const popup = await openPopup();
-  assert.equal(await popup.$eval('#empty', (el) => el.hidden), false);
-  assert.equal(await popup.$eval('#submit', (el) => el.textContent), 'Start');
+  assert.deepEqual(await popupStatus(popup), {
+    caption: 'No current task', title: '', queued: '', enabled: true, state: 'On', empty: true, off: false,
+  });
   await page.close();
   await popup.close();
 });
@@ -200,25 +213,51 @@ test('the empty marker opens the panel ready to add the first task', async () =>
   await other.close();
 });
 
-test('popup rejects an empty task name', async () => {
+test('turning the widget off in the popup hides it on every tab', async () => {
+  const pageA = await openPage('toggle-a');
+  const pageB = await openPage('toggle-b');
+  await withExtensionPage(() => TaskStore.addTask('Keep this'));
+  await waitForOverlay(pageA, showsTask('Keep this'), 'tab A before off');
+  await waitForOverlay(pageB, showsTask('Keep this'), 'tab B before off');
+
   const popup = await openPopup();
-  await popup.type('#title', '   ');
-  await popup.click('#submit');
-  assert.equal(await popup.$eval('#error', (el) => el.hidden), false);
+  const before = await popupStatus(popup);
+  assert.equal(before.title, 'Keep this');
+  assert.equal(before.enabled, true);
+  await popup.click('#enabled');
+  await popup.waitForFunction(() => document.getElementById('toggle-state').textContent === 'Off');
+  const after = await popupStatus(popup);
+  assert.equal(after.enabled, false);
+  assert.equal(after.off, true);
+  assert.equal(after.title, 'Keep this', 'turning off must not clear the queue');
   await popup.close();
-  assert.deepEqual(await storedTitles(), []);
+
+  const hidden = (s) => !s.shown;
+  await waitForOverlay(pageA, hidden, 'tab A hidden');
+  await waitForOverlay(pageB, hidden, 'tab B hidden');
+  assert.deepEqual(await storedTitles(), ['Keep this']);
+
+  const popupOn = await openPopup();
+  await popupOn.click('#enabled');
+  await popupOn.waitForFunction(() => document.getElementById('toggle-state').textContent === 'On');
+  await popupOn.close();
+  await waitForOverlay(pageA, showsTask('Keep this'), 'tab A restored');
+  await waitForOverlay(pageB, showsTask('Keep this'), 'tab B restored');
+
+  await resetStorage({});
+  await waitForOverlay(pageA, showsEmpty, 'cleared');
+  await pageA.close();
+  await pageB.close();
 });
 
 test('task queue: add, edit, reorder, complete and remove, synced across tabs', async (t) => {
   const pageA = await openPage('a');
   const pageB = await openPage('b');
 
-  await t.test('start from popup shows the bar in every open tab', async () => {
+  await t.test('adding a task shows the bar in every open tab', async () => {
+    await withExtensionPage(() => TaskStore.addTask('  Write the weekly report  '));
     const popup = await openPopup();
-    await popup.type('#title', '  Write the weekly report  ');
-    await popup.keyboard.press('Enter');
-    await popup.waitForFunction(() => document.getElementById('current-title').textContent === 'Write the weekly report');
-    assert.equal(await popup.$eval('#submit', (el) => el.textContent), 'Add');
+    assert.equal((await popupStatus(popup)).title, 'Write the weekly report');
     assert.equal(await popup.evaluate(() => chrome.action.getBadgeText({})), '•');
     await popup.close();
 
@@ -368,10 +407,6 @@ test('task queue: add, edit, reorder, complete and remove, synced across tabs', 
     await waitForOverlay(pageB, (o) => showsPill(o) && o.top === 0, 'tab B collapsed');
     await waitForOverlay(pageA, showsPill, 'tab A collapsed');
 
-    const popup = await openPopup();
-    assert.equal(await popup.$eval('#expand', (el) => el.hidden), false);
-    await popup.close();
-
     await pageA.bringToFront();
     await pageA.click(pierce('.pill'));
     await waitForOverlay(pageA, showsTask('Plan next sprint'), 'tab A expanded');
@@ -402,26 +437,28 @@ test('task queue: add, edit, reorder, complete and remove, synced across tabs', 
     await pageB.keyboard.press('Escape');
 
     const popup = await openPopup();
-    assert.equal(await popup.$eval('#empty', (el) => el.hidden), false);
+    assert.equal((await popupStatus(popup)).caption, 'No current task');
     assert.equal(await popup.evaluate(() => chrome.action.getBadgeText({})), '');
     await popup.close();
   });
 
-  await t.test('completing from the popup moves on to the next task', async () => {
-    const popup = await openPopup();
-    await popup.type('#title', 'First');
-    await popup.click('#submit');
-    await popup.waitForFunction(() => document.getElementById('submit').textContent === 'Add');
-    await popup.type('#title', 'Second');
-    await popup.click('#submit');
-    await popup.waitForFunction(() => document.getElementById('queued').textContent === '1 more in the queue');
+  await t.test('completing from the widget moves on to the next task, then the empty marker', async () => {
+    await withExtensionPage(async () => {
+      await TaskStore.addTask('First');
+      await TaskStore.addTask('Second');
+    });
     await waitForOverlay(pageA, showsTask('First', '+1'), 'tab A with two tasks');
-
-    await popup.click('#complete');
-    await waitForOverlay(pageA, showsTask('Second'), 'tab A after popup complete');
-    await popup.click('#complete');
-    await waitForOverlay(pageB, showsEmpty, 'tab B after popup completes everything');
+    const popup = await openPopup();
+    assert.equal((await popupStatus(popup)).queued, '1 more in the queue');
     await popup.close();
+
+    await openPanel(pageA);
+    await pageA.click(`${row(1)} [data-action="complete"]`);
+    await waitForOverlay(pageA, showsTask('Second'), 'tab A after complete');
+    await waitForOverlay(pageB, showsTask('Second'), 'tab B after complete');
+    await pageA.click(`${row(1)} [data-action="complete"]`);
+    await waitForOverlay(pageA, showsEmpty, 'tab A after last complete');
+    await waitForOverlay(pageB, showsEmpty, 'tab B after last complete');
   });
 
   await pageA.close();
