@@ -1,6 +1,6 @@
 {
   "name": "task-reminder-extension",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Chrome extension that keeps the current task pinned to the top-right of every page.",
   "type": "module",

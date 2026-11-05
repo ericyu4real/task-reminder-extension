@@ -11,6 +11,7 @@ import puppeteer from 'puppeteer';
 const EXTENSION_PATH = path.resolve(import.meta.dirname, '../extension');
 const HOST = '#task-reminder-ext-root';
 const pierce = (selector) => `${HOST} >>> ${selector}`;
+const row = (n) => pierce(`.row:nth-child(${n})`);
 
 let server;
 let baseUrl;
@@ -49,9 +50,23 @@ async function openPage(name) {
 async function openPopup() {
   const page = await browser.newPage();
   await page.goto(`chrome-extension://${extensionId}/popup.html`);
-  await page.waitForFunction(() => document.getElementById('submit').textContent.length > 0);
+  await page.waitForFunction(() => document.readyState === 'complete');
+  await new Promise((r) => setTimeout(r, 100));
   return page;
 }
+
+// Reads or writes extension storage from an extension page.
+async function withExtensionPage(fn, arg) {
+  const page = await openPopup();
+  try {
+    return await page.evaluate(fn, arg);
+  } finally {
+    await page.close();
+  }
+}
+
+const storedTitles = () => withExtensionPage(async () => (await TaskStore.get()).tasks.map((t) => t.title));
+const resetStorage = (values) => withExtensionPage((v) => chrome.storage.local.clear().then(() => chrome.storage.local.set(v)), values);
 
 function overlayState(page) {
   return page.evaluate((hostSelector) => {
@@ -68,9 +83,12 @@ function overlayState(page) {
       present: true,
       shown: getComputedStyle(host).display !== 'none',
       text: root.querySelector('.text').textContent,
+      count: visible('.count') ? root.querySelector('.count').textContent : '',
       bar: visible('.bar'),
-      menu: visible('.menu'),
-      editor: visible('.editor'),
+      panel: visible('.panel'),
+      editing: visible('.row-edit'),
+      rows: [...root.querySelectorAll('.row')].map((r) =>
+        `${r.querySelector('.marker').textContent} ${r.querySelector('.row-title')?.textContent ?? '(editing)'}`),
       pill: visible('.pill'),
       resetItem: visible('[data-action="reset-position"]'),
       top: Math.round(rect.top),
@@ -102,10 +120,25 @@ async function drag(page, selector, dx, dy) {
   await page.mouse.up();
 }
 
-const showsTask = (title) => (s) => s.shown && s.bar && !s.pill && s.text === `Working on: ${title}`;
+async function openPanel(page) {
+  await page.bringToFront();
+  const s = await overlayState(page);
+  if (!s.panel) await page.click(pierce('.bar'));
+  await waitForOverlay(page, (o) => o.panel, 'panel open');
+}
+
+async function addFromWidget(page, title) {
+  await page.click(pierce('.add input'));
+  await page.keyboard.type(title);
+  await page.keyboard.press('Enter');
+}
+
+const showsTask = (title, count = '') => (s) =>
+  s.shown && s.bar && !s.pill && s.text === `Working on: ${title}` && s.count === count;
 const showsPill = (s) => s.shown && s.pill && !s.bar;
 const hidden = (s) => !s.shown;
 const at = (top, rightGap) => (s) => s.shown && s.top === top && s.rightGap === rightGap;
+const listIs = (...rows) => (s) => s.panel && JSON.stringify(s.rows) === JSON.stringify(rows);
 
 before(async () => {
   server = http.createServer((req, res) => {
@@ -124,7 +157,7 @@ after(async () => {
   fs.rmSync(userDataDir, { recursive: true, force: true });
 });
 
-test('no task: no bar on pages, popup shows empty state', async () => {
+test('no tasks: no bar on pages, popup shows empty state', async () => {
   const page = await openPage('a');
   await waitForOverlay(page, hidden, 'empty page');
   const popup = await openPopup();
@@ -139,12 +172,11 @@ test('popup rejects an empty task name', async () => {
   await popup.type('#title', '   ');
   await popup.click('#submit');
   assert.equal(await popup.$eval('#error', (el) => el.hidden), false);
-  const stored = await popup.evaluate(() => chrome.storage.local.get('task'));
-  assert.equal(stored.task ?? null, null);
   await popup.close();
+  assert.deepEqual(await storedTitles(), []);
 });
 
-test('start in popup, then sync, edit, collapse, drag, persist and complete across tabs', async (t) => {
+test('task queue: add, edit, reorder, complete and remove, synced across tabs', async (t) => {
   const pageA = await openPage('a');
   const pageB = await openPage('b');
 
@@ -153,7 +185,7 @@ test('start in popup, then sync, edit, collapse, drag, persist and complete acro
     await popup.type('#title', '  Write the weekly report  ');
     await popup.keyboard.press('Enter');
     await popup.waitForFunction(() => document.getElementById('current-title').textContent === 'Write the weekly report');
-    assert.equal(await popup.$eval('#submit', (el) => el.textContent), 'Update');
+    assert.equal(await popup.$eval('#submit', (el) => el.textContent), 'Add');
     assert.equal(await popup.evaluate(() => chrome.action.getBadgeText({})), '•');
     await popup.close();
 
@@ -174,68 +206,110 @@ test('start in popup, then sync, edit, collapse, drag, persist and complete acro
     assert.equal(await pageA.evaluate(() => Math.round(window.scrollY)), 3000);
     assert.equal(s.top, 12);
     assert.equal(s.rightGap, 12);
-    assert.equal(s.resetItem, false);
   });
 
-  await t.test('edit from the page bar updates the other tab', async () => {
-    await pageA.bringToFront();
-    await pageA.click(pierce('.bar'));
-    await waitForOverlay(pageA, (s) => s.menu, 'menu open');
-    await pageA.click(pierce('[data-action="edit"]'));
-    await waitForOverlay(pageA, (s) => s.editor && !s.bar, 'editor open');
+  await t.test('tasks added from the widget queue up behind the current one', async () => {
+    await openPanel(pageA);
+    await waitForOverlay(pageA, listIs('Now Write the weekly report'), 'initial list');
 
     const keydownsBefore = await pageA.evaluate(() => window.pageKeydowns);
-    // The editor opens with the old title selected, so typing replaces it.
-    await pageA.keyboard.type('Clean up meeting notes');
-    await pageA.keyboard.press('Enter');
+    await addFromWidget(pageA, 'Review the pull request');
+    await addFromWidget(pageA, 'Plan next sprint');
     assert.equal(await pageA.evaluate(() => window.pageKeydowns), keydownsBefore,
-      'typing in the editor must not reach page keyboard handlers');
+      'typing in the widget must not reach page keyboard handlers');
 
-    await waitForOverlay(pageA, showsTask('Clean up meeting notes'), 'tab A after edit');
-    await waitForOverlay(pageB, showsTask('Clean up meeting notes'), 'tab B after edit');
-
-    const popup = await openPopup();
-    assert.equal(await popup.$eval('#current-title', (el) => el.textContent), 'Clean up meeting notes');
-    await popup.close();
+    await waitForOverlay(pageA,
+      listIs('Now Write the weekly report', '2 Review the pull request', '3 Plan next sprint'), 'list after adding');
+    await waitForOverlay(pageA, showsTask('Write the weekly report', '+2'), 'tab A count');
+    await waitForOverlay(pageB, showsTask('Write the weekly report', '+2'), 'tab B count');
   });
 
-  await t.test('Escape and outside clicks close the menu without changing the task', async () => {
-    await pageA.bringToFront();
-    await pageA.click(pierce('.bar'));
-    await waitForOverlay(pageA, (s) => s.menu, 'menu open');
+  await t.test('editing a queued task updates storage and the other tab', async () => {
+    await openPanel(pageA);
+    await pageA.click(`${row(2)} [data-action="edit"]`);
+    await waitForOverlay(pageA, (s) => s.editing, 'editing row 2');
+    await pageA.keyboard.type('Review PR #42');
+    await pageA.keyboard.press('Enter');
+    await waitForOverlay(pageA,
+      listIs('Now Write the weekly report', '2 Review PR #42', '3 Plan next sprint'), 'list after edit');
+    assert.deepEqual(await storedTitles(), ['Write the weekly report', 'Review PR #42', 'Plan next sprint']);
+
+    await openPanel(pageB);
+    await waitForOverlay(pageB,
+      listIs('Now Write the weekly report', '2 Review PR #42', '3 Plan next sprint'), 'tab B list after edit');
+    await pageB.keyboard.press('Escape');
+  });
+
+  await t.test('Escape cancels an edit without saving, then closes the panel', async () => {
+    await openPanel(pageA);
+    await pageA.click(`${row(1)} [data-action="edit"]`);
+    await waitForOverlay(pageA, (s) => s.editing, 'editing row 1');
+    await pageA.keyboard.type('Something else');
     await pageA.keyboard.press('Escape');
-    await waitForOverlay(pageA, (s) => !s.menu && s.bar, 'menu closed by Escape');
+    await waitForOverlay(pageA, (s) => s.panel && !s.editing && s.rows[0] === 'Now Write the weekly report',
+      'edit cancelled');
+    await pageA.keyboard.press('Escape');
+    await waitForOverlay(pageA, (s) => !s.panel && s.bar, 'panel closed by Escape');
 
-    await pageA.click(pierce('.bar'));
-    await waitForOverlay(pageA, (s) => s.menu, 'menu reopened');
-    await pageA.mouse.click(200, 300);
-    await waitForOverlay(pageA, (s) => !s.menu && showsTask('Clean up meeting notes')(s), 'menu closed by outside click');
+    await openPanel(pageA);
+    await pageA.mouse.click(200, 400);
+    await waitForOverlay(pageA, (s) => !s.panel, 'panel closed by outside click');
   });
 
-  await t.test('dragging moves the bar, does not open the menu, and syncs to other tabs', async () => {
+  await t.test('moving a task to the top makes it the current task everywhere', async () => {
+    await openPanel(pageA);
+    assert.equal(await pageA.$eval(`${row(1)} [data-action="up"]`, (b) => b.disabled), true);
+    assert.equal(await pageA.$eval(`${row(3)} [data-action="down"]`, (b) => b.disabled), true);
+
+    await pageA.click(`${row(3)} [data-action="up"]`);
+    await waitForOverlay(pageA,
+      listIs('Now Write the weekly report', '2 Plan next sprint', '3 Review PR #42'), 'after one move up');
+    await pageA.click(`${row(2)} [data-action="up"]`);
+    await waitForOverlay(pageA,
+      listIs('Now Plan next sprint', '2 Write the weekly report', '3 Review PR #42'), 'after second move up');
+    await waitForOverlay(pageB, showsTask('Plan next sprint', '+2'), 'tab B follows the new order');
+
+    await pageA.click(`${row(1)} [data-action="down"]`);
+    await waitForOverlay(pageA,
+      listIs('Now Write the weekly report', '2 Plan next sprint', '3 Review PR #42'), 'after move down');
+  });
+
+  await t.test('completing the current task moves on to the next one', async () => {
+    await openPanel(pageA);
+    await pageA.click(`${row(1)} [data-action="complete"]`);
+    await waitForOverlay(pageA, listIs('Now Plan next sprint', '2 Review PR #42'), 'after complete');
+    await waitForOverlay(pageA, showsTask('Plan next sprint', '+1'), 'tab A bar after complete');
+    await waitForOverlay(pageB, showsTask('Plan next sprint', '+1'), 'tab B bar after complete');
+  });
+
+  await t.test('removing a queued task leaves the current task alone', async () => {
+    await openPanel(pageA);
+    assert.equal(await pageA.$(`${row(1)} [data-action="remove"]`), null, 'current task has Done, not Remove');
+    await pageA.click(`${row(2)} [data-action="remove"]`);
+    await waitForOverlay(pageA, listIs('Now Plan next sprint'), 'after remove');
+    await waitForOverlay(pageB, showsTask('Plan next sprint'), 'tab B after remove');
+    await pageA.keyboard.press('Escape');
+  });
+
+  await t.test('dragging moves the widget, does not open the panel, and syncs to other tabs', async () => {
     await pageA.bringToFront();
     await drag(pageA, '.bar', -300, 200);
     const moved = await waitForOverlay(pageA, at(212, 312), 'tab A after drag');
-    assert.equal(moved.menu, false, 'a drag must not count as a click');
-
-    const popup = await openPopup();
+    assert.equal(moved.panel, false, 'a drag must not count as a click');
     assert.deepEqual(
-      (await popup.evaluate(() => chrome.storage.local.get('position'))).position,
+      await withExtensionPage(async () => (await chrome.storage.local.get('position')).position),
       { top: 212, right: 312 },
     );
-    await popup.close();
-
     await waitForOverlay(pageB, at(212, 312), 'tab B follows the drag');
   });
 
-  await t.test('a plain click still opens the menu after a drag, and offers Reset position', async () => {
-    await pageA.bringToFront();
-    await pageA.click(pierce('.bar'));
-    await waitForOverlay(pageA, (s) => s.menu && s.resetItem, 'menu with reset item');
+  await t.test('a plain click still opens the panel after a drag, and offers Reset position', async () => {
+    await openPanel(pageA);
+    await waitForOverlay(pageA, (s) => s.panel && s.resetItem, 'panel with reset item');
     await pageA.keyboard.press('Escape');
   });
 
-  await t.test('the bar cannot be dragged out of the viewport', async () => {
+  await t.test('the widget cannot be dragged out of the viewport', async () => {
     await pageA.bringToFront();
     await drag(pageA, '.bar', 5000, 5000);
     const s = await waitForOverlay(pageA, (o) => o.rightGap === 0 && o.bottomGap === 0, 'dragged to bottom-right');
@@ -244,10 +318,10 @@ test('start in popup, then sync, edit, collapse, drag, persist and complete acro
     await drag(pageA, '.bar', -5000, -5000);
     await waitForOverlay(pageA, (o) => o.top === 0 && o.left === 0, 'dragged to top-left');
 
-    // The menu opens downward; near the bottom the whole bar shifts up so the menu stays visible.
+    // The panel opens downward; near the bottom the whole widget shifts up so it stays visible.
     await drag(pageA, '.bar', 0, 5000);
     await pageA.click(pierce('.bar'));
-    await waitForOverlay(pageA, (o) => o.menu && o.bottomGap === 0, 'menu fits at the bottom');
+    await waitForOverlay(pageA, (o) => o.panel && o.bottomGap === 0, 'panel fits at the bottom');
     await pageA.keyboard.press('Escape');
   });
 
@@ -256,9 +330,7 @@ test('start in popup, then sync, edit, collapse, drag, persist and complete acro
     await drag(pageA, '.bar', 0, -5000);
     await waitForOverlay(pageA, (o) => o.top === 0 && o.left === 0, 'back to top-left');
 
-    await pageB.bringToFront();
-    await waitForOverlay(pageB, (o) => o.top === 0 && o.left === 0, 'tab B at top-left');
-    await pageB.click(pierce('.bar'));
+    await openPanel(pageB);
     await pageB.click(pierce('[data-action="collapse"]'));
     await waitForOverlay(pageB, (o) => showsPill(o) && o.top === 0, 'tab B collapsed');
     await waitForOverlay(pageA, showsPill, 'tab A collapsed');
@@ -269,34 +341,31 @@ test('start in popup, then sync, edit, collapse, drag, persist and complete acro
 
     await pageA.bringToFront();
     await pageA.click(pierce('.pill'));
-    await waitForOverlay(pageA, showsTask('Clean up meeting notes'), 'tab A expanded');
-    await waitForOverlay(pageB, showsTask('Clean up meeting notes'), 'tab B expanded');
+    await waitForOverlay(pageA, showsTask('Plan next sprint'), 'tab A expanded');
+    await waitForOverlay(pageB, showsTask('Plan next sprint'), 'tab B expanded');
   });
 
-  await t.test('reloading a page keeps the task and the position', async () => {
+  await t.test('reloading a page keeps the queue and the position', async () => {
     await pageA.reload();
     await pageA.waitForSelector(HOST);
-    await waitForOverlay(pageA, (o) => showsTask('Clean up meeting notes')(o) && o.top === 0 && o.left === 0,
+    await waitForOverlay(pageA, (o) => showsTask('Plan next sprint')(o) && o.top === 0 && o.left === 0,
       'tab A after reload');
   });
 
-  await t.test('Reset position puts the bar back in the top-right corner everywhere', async () => {
-    await pageA.bringToFront();
-    await pageA.click(pierce('.bar'));
+  await t.test('Reset position puts the widget back in the top-right corner everywhere', async () => {
+    await openPanel(pageA);
     await pageA.click(pierce('[data-action="reset-position"]'));
     await waitForOverlay(pageA, at(12, 12), 'tab A after reset');
     await waitForOverlay(pageB, at(12, 12), 'tab B after reset');
-    await pageA.click(pierce('.bar'));
-    await waitForOverlay(pageA, (o) => o.menu && !o.resetItem, 'reset item hidden at default position');
+    await waitForOverlay(pageA, (o) => o.panel && !o.resetItem, 'reset item hidden at default position');
     await pageA.keyboard.press('Escape');
   });
 
-  await t.test('complete from the page bar hides it in every tab', async () => {
-    await pageB.bringToFront();
-    await pageB.click(pierce('.bar'));
-    await pageB.click(pierce('[data-action="complete"]'));
-    await waitForOverlay(pageB, hidden, 'tab B after complete');
-    await waitForOverlay(pageA, hidden, 'tab A after complete');
+  await t.test('completing the last task hides the bar in every tab', async () => {
+    await openPanel(pageB);
+    await pageB.click(`${row(1)} [data-action="complete"]`);
+    await waitForOverlay(pageB, hidden, 'tab B after last complete');
+    await waitForOverlay(pageA, hidden, 'tab A after last complete');
 
     const popup = await openPopup();
     assert.equal(await popup.$eval('#empty', (el) => el.hidden), false);
@@ -304,14 +373,20 @@ test('start in popup, then sync, edit, collapse, drag, persist and complete acro
     await popup.close();
   });
 
-  await t.test('completing from the popup also hides the bar', async () => {
+  await t.test('completing from the popup moves on to the next task', async () => {
     const popup = await openPopup();
-    await popup.type('#title', 'Quick errand');
+    await popup.type('#title', 'First');
     await popup.click('#submit');
-    await waitForOverlay(pageA, showsTask('Quick errand'), 'tab A after second start');
+    await popup.waitForFunction(() => document.getElementById('submit').textContent === 'Add');
+    await popup.type('#title', 'Second');
+    await popup.click('#submit');
+    await popup.waitForFunction(() => document.getElementById('queued').textContent === '1 more in the queue');
+    await waitForOverlay(pageA, showsTask('First', '+1'), 'tab A with two tasks');
+
     await popup.click('#complete');
-    await waitForOverlay(pageA, hidden, 'tab A after popup complete');
-    await waitForOverlay(pageB, hidden, 'tab B after popup complete');
+    await waitForOverlay(pageA, showsTask('Second'), 'tab A after popup complete');
+    await popup.click('#complete');
+    await waitForOverlay(pageB, hidden, 'tab B after popup completes everything');
     await popup.close();
   });
 
@@ -319,16 +394,15 @@ test('start in popup, then sync, edit, collapse, drag, persist and complete acro
   await pageB.close();
 });
 
-test('the task and bar position survive a browser restart', async () => {
+test('the queue and widget position survive a browser restart', async () => {
+  await resetStorage({});
   const page = await openPage('before-restart');
-  const popup = await openPopup();
-  await popup.type('#title', 'Review algorithms');
-  await popup.click('#submit');
-  await popup.waitForFunction(() => document.getElementById('current-title').textContent === 'Review algorithms');
-  await popup.close();
-
+  await withExtensionPage(async () => {
+    await TaskStore.addTask('Review algorithms');
+    await TaskStore.addTask('Read chapter 4');
+  });
+  await waitForOverlay(page, showsTask('Review algorithms', '+1'), 'before restart');
   await page.bringToFront();
-  await waitForOverlay(page, showsTask('Review algorithms'), 'before restart');
   await drag(page, '.bar', -100, 50);
   await waitForOverlay(page, at(62, 112), 'moved before restart');
 
@@ -336,40 +410,51 @@ test('the task and bar position survive a browser restart', async () => {
   await launch();
 
   const after = await openPage('after-restart');
-  await waitForOverlay(after, (o) => showsTask('Review algorithms')(o) && o.top === 62 && o.rightGap === 112,
+  await waitForOverlay(after, (o) => showsTask('Review algorithms', '+1')(o) && o.top === 62 && o.rightGap === 112,
     'page after restart');
-  const popupAgain = await openPopup();
-  assert.equal(await popupAgain.$eval('#current-title', (el) => el.textContent), 'Review algorithms');
-  await popupAgain.close();
+  assert.deepEqual(await storedTitles(), ['Review algorithms', 'Read chapter 4']);
   await after.close();
 });
 
-test('reloading the extension leaves exactly one bar in already-open tabs', async () => {
+test('reloading the extension leaves exactly one widget in already-open tabs', async () => {
   const visibleHosts = (page) => page.evaluate(() =>
     [...document.querySelectorAll('[id^="task-reminder-ext-root"]')]
       .filter((h) => getComputedStyle(h).display !== 'none').length);
 
   const page = await openPage('before-extension-reload');
-  const popup = await openPopup();
-  await popup.evaluate(() => chrome.storage.local.set({ position: null, collapsed: true }));
-  await popup.close();
+  await withExtensionPage(() => chrome.storage.local.set({ position: null, collapsed: true }));
   await waitForOverlay(page, (o) => showsPill(o) && o.top === 12, 'collapsed before reload');
 
   // Reinstalling an unpacked extension from the same folder is what the reload button does.
   await browser.installExtension(EXTENSION_PATH);
   await new Promise((r) => setTimeout(r, 1500));
 
-  const popupAfter = await openPopup();
-  await popupAfter.evaluate(() => chrome.storage.local.set({ position: { top: 200, right: 300 }, collapsed: false }));
-  await popupAfter.close();
-
+  await withExtensionPage(() => chrome.storage.local.set({ position: { top: 200, right: 300 }, collapsed: false }));
   await page.bringToFront();
-  await waitForOverlay(page, (o) => showsTask('Review algorithms')(o) && o.top === 200 && o.rightGap === 300,
-    'new bar follows the new position');
+  await waitForOverlay(page, (o) => showsTask('Review algorithms', '+1')(o) && o.top === 200 && o.rightGap === 300,
+    'new widget follows the new position');
   assert.equal(await visibleHosts(page), 1, 'the previous version left a visible copy behind');
 
   await drag(page, '.bar', -50, 50);
   await waitForOverlay(page, at(250, 350), 'dragged after reload');
   assert.equal(await visibleHosts(page), 1);
+  await page.close();
+});
+
+test('a single task saved by an older version is migrated into the queue', async () => {
+  await resetStorage({ task: { title: 'Task from v0.2', startedAt: 1 }, collapsed: false });
+  const page = await openPage('legacy');
+  await waitForOverlay(page, showsTask('Task from v0.2'), 'legacy task shown before migration');
+
+  await browser.installExtension(EXTENSION_PATH);
+  await new Promise((r) => setTimeout(r, 1500));
+
+  const stored = await withExtensionPage(() => chrome.storage.local.get(['tasks', 'task']));
+  assert.deepEqual(stored.tasks.map((t) => t.title), ['Task from v0.2']);
+  assert.equal('task' in stored, false, 'legacy key removed');
+
+  await openPanel(page);
+  await addFromWidget(page, 'Next thing');
+  await waitForOverlay(page, listIs('Now Task from v0.2', '2 Next thing'), 'migrated queue accepts new tasks');
   await page.close();
 });

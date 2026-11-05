@@ -1,6 +1,7 @@
 const els = {
   current: document.getElementById('current'),
   currentTitle: document.getElementById('current-title'),
+  queued: document.getElementById('queued'),
   empty: document.getElementById('empty'),
   form: document.getElementById('form'),
   title: document.getElementById('title'),
@@ -11,28 +12,24 @@ const els = {
   expand: document.getElementById('expand'),
 };
 
-let lastRenderedTitle;
-
 function showError(message) {
   els.error.textContent = message;
   els.error.hidden = !message;
 }
 
 async function render() {
-  const { task, collapsed } = await TaskStore.get();
-  els.current.hidden = !task;
-  els.empty.hidden = !!task;
-  els.actions.hidden = !task;
+  const { tasks, collapsed } = await TaskStore.get();
+  const current = tasks[0];
+  const more = tasks.length - 1;
+  els.current.hidden = !current;
+  els.empty.hidden = !!current;
+  els.actions.hidden = !current;
   els.expand.hidden = !collapsed;
-  els.currentTitle.textContent = task?.title ?? '';
-  els.submit.textContent = task ? 'Update' : 'Start';
-  els.title.placeholder = task ? 'Rename the task' : 'What are you working on?';
-
-  const title = task?.title ?? '';
-  if (title !== lastRenderedTitle) {
-    els.title.value = title;
-    lastRenderedTitle = title;
-  }
+  els.currentTitle.textContent = current?.title ?? '';
+  els.queued.textContent = more > 0 ? `${more} more in the queue` : '';
+  els.queued.hidden = more <= 0;
+  els.submit.textContent = current ? 'Add' : 'Start';
+  els.title.placeholder = current ? 'Add another task' : 'What are you working on?';
 }
 
 els.form.addEventListener('submit', async (event) => {
@@ -44,17 +41,21 @@ els.form.addEventListener('submit', async (event) => {
     return;
   }
   showError('');
-  const { task } = await TaskStore.get();
-  if (task) await TaskStore.rename(title);
-  else await TaskStore.start(title);
+  try {
+    await TaskStore.addTask(title);
+  } catch (error) {
+    showError(error.message);
+    return;
+  }
+  els.title.value = '';
   await render();
-  els.title.select();
+  els.title.focus();
 });
 
 els.title.addEventListener('input', () => showError(''));
 
 els.complete.addEventListener('click', async () => {
-  await TaskStore.complete();
+  await TaskStore.completeCurrent();
   await render();
   els.title.focus();
 });
@@ -63,7 +64,4 @@ els.expand.addEventListener('click', () => TaskStore.setCollapsed(false));
 
 TaskStore.onChange(render);
 
-render().then(() => {
-  els.title.focus();
-  els.title.select();
-});
+render().then(() => els.title.focus());
