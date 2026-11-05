@@ -90,6 +90,9 @@ function overlayState(page) {
       rows: [...root.querySelectorAll('.row')].map((r) =>
         `${r.querySelector('.marker').textContent} ${r.querySelector('.row-title')?.textContent ?? '(editing)'}`),
       pill: visible('.pill'),
+      emptyMarker: visible('.pill.empty'),
+      emptyNote: visible('.empty-note'),
+      addFocused: root.activeElement === root.querySelector('.add input'),
       resetItem: visible('[data-action="reset-position"]'),
       top: Math.round(rect.top),
       rightGap: Math.round(viewport.clientWidth - rect.right),
@@ -135,8 +138,8 @@ async function addFromWidget(page, title) {
 
 const showsTask = (title, count = '') => (s) =>
   s.shown && s.bar && !s.pill && s.text === `Working on: ${title}` && s.count === count;
-const showsPill = (s) => s.shown && s.pill && !s.bar;
-const hidden = (s) => !s.shown;
+const showsPill = (s) => s.shown && s.pill && !s.emptyMarker && !s.bar;
+const showsEmpty = (s) => s.shown && s.emptyMarker && !s.bar;
 const at = (top, rightGap) => (s) => s.shown && s.top === top && s.rightGap === rightGap;
 const listIs = (...rows) => (s) => s.panel && JSON.stringify(s.rows) === JSON.stringify(rows);
 
@@ -157,14 +160,44 @@ after(async () => {
   fs.rmSync(userDataDir, { recursive: true, force: true });
 });
 
-test('no tasks: no bar on pages, popup shows empty state', async () => {
+test('no tasks: pages show only the empty marker, popup shows empty state', async () => {
   const page = await openPage('a');
-  await waitForOverlay(page, hidden, 'empty page');
+  await waitForOverlay(page, (s) => showsEmpty(s) && !s.panel && s.top === 12 && s.rightGap === 12, 'empty page');
   const popup = await openPopup();
   assert.equal(await popup.$eval('#empty', (el) => el.hidden), false);
   assert.equal(await popup.$eval('#submit', (el) => el.textContent), 'Start');
   await page.close();
   await popup.close();
+});
+
+test('the empty marker opens the panel ready to add the first task', async () => {
+  const page = await openPage('empty-marker');
+  const other = await openPage('empty-marker-other');
+  await page.bringToFront();
+  await page.click(pierce('.pill'));
+  const s = await waitForOverlay(page, (o) => o.panel && o.emptyNote && o.addFocused, 'empty panel');
+  assert.deepEqual(s.rows, []);
+  assert.equal(await page.$eval(pierce('[data-action="collapse"]'), (el) => el.hidden), true,
+    'nothing to collapse without a task');
+
+  await page.keyboard.type('First task from the marker');
+  await page.keyboard.press('Enter');
+  await waitForOverlay(page, (o) => showsTask('First task from the marker')(o) && o.panel && !o.emptyNote,
+    'bar appears, panel stays open');
+  await waitForOverlay(other, showsTask('First task from the marker'), 'other tab shows the new task');
+
+  // Completing the last task returns to the empty state with the add box focused.
+  await page.click(`${row(1)} [data-action="complete"]`);
+  await waitForOverlay(page, (o) => showsEmpty(o) && o.panel && o.emptyNote && o.addFocused, 'back to empty');
+  await waitForOverlay(other, showsEmpty, 'other tab back to empty');
+  await page.keyboard.press('Escape');
+  await waitForOverlay(page, (o) => showsEmpty(o) && !o.panel, 'panel closed');
+
+  await drag(page, '.pill', -200, 100);
+  await waitForOverlay(page, (o) => showsEmpty(o) && o.top === 112 && !o.panel, 'empty marker is draggable');
+  await withExtensionPage(() => TaskStore.resetPosition());
+  await page.close();
+  await other.close();
 });
 
 test('popup rejects an empty task name', async () => {
@@ -361,11 +394,12 @@ test('task queue: add, edit, reorder, complete and remove, synced across tabs', 
     await pageA.keyboard.press('Escape');
   });
 
-  await t.test('completing the last task hides the bar in every tab', async () => {
+  await t.test('completing the last task returns every tab to the empty marker', async () => {
     await openPanel(pageB);
     await pageB.click(`${row(1)} [data-action="complete"]`);
-    await waitForOverlay(pageB, hidden, 'tab B after last complete');
-    await waitForOverlay(pageA, hidden, 'tab A after last complete');
+    await waitForOverlay(pageB, (o) => showsEmpty(o) && o.panel, 'tab B after last complete');
+    await waitForOverlay(pageA, (o) => showsEmpty(o) && !o.panel, 'tab A after last complete');
+    await pageB.keyboard.press('Escape');
 
     const popup = await openPopup();
     assert.equal(await popup.$eval('#empty', (el) => el.hidden), false);
@@ -386,7 +420,7 @@ test('task queue: add, edit, reorder, complete and remove, synced across tabs', 
     await popup.click('#complete');
     await waitForOverlay(pageA, showsTask('Second'), 'tab A after popup complete');
     await popup.click('#complete');
-    await waitForOverlay(pageB, hidden, 'tab B after popup completes everything');
+    await waitForOverlay(pageB, showsEmpty, 'tab B after popup completes everything');
     await popup.close();
   });
 

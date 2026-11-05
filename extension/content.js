@@ -106,6 +106,8 @@
       touch-action: none; user-select: none;
     }
     .pill:hover, .pill:focus-visible { opacity: 1; }
+    .pill.empty .dot { width: 8px; height: 8px; box-sizing: border-box; background: transparent; border: 1.5px solid #d1d1d6; }
+    .empty-note { margin: 0; padding: 8px 8px 6px; color: #8e8e93; }
     .wrap.dragging .bar, .wrap.dragging .pill { cursor: grabbing; opacity: 1; }
   `;
 
@@ -132,6 +134,7 @@
       <div class="panel" role="dialog" aria-label="Tasks" tabindex="-1" hidden>
         <div class="head"><span>Tasks</span><span class="head-count"></span></div>
         <ol class="list"></ol>
+        <p class="empty-note" hidden>Nothing queued yet. What are you working on?</p>
         <form class="add">
           <input type="text" maxlength="${TaskStore.MAX_TITLE_LENGTH}" placeholder="Add a task…" autocomplete="off" aria-label="New task" />
           <button class="primary" type="submit">Add</button>
@@ -155,7 +158,9 @@
   const list = $('.list');
   const addForm = $('.add');
   const addInput = $('.add input');
+  const emptyNote = $('.empty-note');
   const foot = $('.foot');
+  const collapseItem = $('[data-action="collapse"]');
   const resetPositionItem = $('[data-action="reset-position"]');
   const pill = $('.pill');
 
@@ -279,6 +284,7 @@
       return;
     }
     if (!focusWasInList) return;
+    if (tasks.length === 0) return addInput.focus();
     const sameButton = focusedButton &&
       list.querySelector(`.row[data-id="${CSS.escape(focusedButton.id)}"] [data-action="${focusedButton.action}"]`);
     if (sameButton && !sameButton.disabled) sameButton.focus();
@@ -293,30 +299,34 @@
     const current = tasks[0];
     if (editingId && !tasks.some((t) => t.id === editingId)) editingId = null;
 
-    if (!current) {
-      open = false;
-      editingId = null;
-      host.style.setProperty('display', 'none', 'important');
-      return;
-    }
     host.style.setProperty('display', 'block', 'important');
-    if (collapsed) {
+    // With no tasks the widget shrinks to an empty marker; "collapsed" only applies to a real task.
+    const showPill = !current || collapsed;
+    if (current && collapsed) {
       open = false;
       editingId = null;
     }
 
-    const more = tasks.length - 1;
-    titleEl.textContent = current.title;
-    countEl.textContent = `+${more}`;
-    countEl.hidden = more === 0;
-    const queued = more ? `\n${more} more in the queue` : '';
-    bar.title = `Working on: ${current.title}${queued}\nClick to manage, drag to move`;
-    pill.title = `Working on: ${current.title}${queued}\nClick to expand, drag to move`;
+    if (current) {
+      const more = tasks.length - 1;
+      titleEl.textContent = current.title;
+      countEl.textContent = `+${more}`;
+      countEl.hidden = more === 0;
+      const queued = more ? `\n${more} more in the queue` : '';
+      bar.title = `Working on: ${current.title}${queued}\nClick to manage, drag to move`;
+      pill.title = `Working on: ${current.title}${queued}\nClick to expand, drag to move`;
+    } else {
+      pill.title = 'Task Reminder: no current task\nClick to add one, drag to move';
+    }
 
-    bar.hidden = collapsed;
-    pill.hidden = !collapsed;
+    bar.hidden = showPill;
+    pill.hidden = !showPill;
+    pill.classList.toggle('empty', !current);
     panel.hidden = !open;
+    emptyNote.hidden = !!current;
+    collapseItem.hidden = !current;
     bar.setAttribute('aria-expanded', String(open));
+    pill.setAttribute('aria-expanded', String(open));
     resetPositionItem.hidden = !position;
     if (open) renderList();
     applyPosition();
@@ -326,6 +336,7 @@
     open = next;
     if (!open) editingId = null;
     render();
+    if (open && state.tasks.length === 0) addInput.focus();
   }
 
   function startEdit(id) {
@@ -450,7 +461,8 @@
 
   pill.addEventListener('click', () => {
     if (suppressNextClick) return;
-    safely(() => TaskStore.setCollapsed(false));
+    if (state.tasks.length === 0) setOpen(!open);
+    else safely(() => TaskStore.setCollapsed(false));
   });
 
   list.addEventListener('click', (event) => {
@@ -481,7 +493,11 @@
       setOpen(false);
       safely(() => TaskStore.setCollapsed(true));
     }
-    if (action === 'reset-position') safely(() => TaskStore.resetPosition());
+    if (action === 'reset-position') {
+      // The item hides itself once the widget is back at the default position.
+      panel.focus({ preventScroll: true });
+      safely(() => TaskStore.resetPosition());
+    }
   });
 
   // Keep typing in the widget from triggering the page's keyboard shortcuts.
