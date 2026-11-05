@@ -1,19 +1,19 @@
 # Task Reminder (Chrome extension)
 
-Shows a small floating bar — "Working on: *your task*" — in the corner of every regular web page, so you always remember what you sat down to do.
+Shows a small floating bar — "Working on: *your current task*" — in the corner of every regular web page, so you always remember what you sat down to do.
 
 ![The bar on a page](docs/bar.png)
 
 ## Features
 
-- One current task at a time. No lists.
-- Set the task from the toolbar icon: type it and press **Start**.
-- The bar stays fixed in the viewport while you scroll, and is styled to stay out of the way.
-- **Drag the bar anywhere.** The position is remembered and shared across tabs. It can't be dragged off-screen, and **Reset position** in the bar's menu puts it back in the top-right corner.
-- Click the bar to **Edit task**, **Complete task**, or **Collapse** it. Collapsed, it leaves a small dot you can click to expand again.
-- The task, collapsed state and position are stored in `chrome.storage.local` and sync live across all tabs. They survive page reloads, new tabs and browser restarts.
-- With no task, nothing is shown on pages.
-- Chrome's internal pages (`chrome://` pages, the New Tab page, the Chrome Web Store) can't show the bar; manage the task from the toolbar icon there. The icon shows a small green dot while a task is active.
+- An ordered **queue of tasks**. The first one is current; the rest wait in line.
+- The bar always shows the top task. A `+N` chip appears when more are queued.
+- Click the bar to open the panel: **add**, **edit**, **reorder**, **remove**, or mark the current task **done**. Done pops it off the queue and the next one becomes current.
+- **Drag the bar anywhere.** The position is remembered and shared across tabs. It can't be dragged off-screen. **Reset position** puts it back in the top-right corner.
+- Collapse the bar to a small dot. With no tasks, the widget shrinks to a hollow marker you can click to add the first one.
+- The toolbar popup is a simple **on/off** switch plus a glance at the current task. All editing happens in the widget on the page.
+- Queue, collapsed state, position and on/off are stored in `chrome.storage.local` and sync live across all tabs. They survive reloads, new tabs and browser restarts.
+- Chrome's internal pages (`chrome://`, the New Tab page, the Chrome Web Store) can't show the widget; turn it on or off from the toolbar icon there. The icon shows a small green dot while a task is active.
 
 Everything stays on your machine: no account, no backend, no network requests.
 
@@ -24,35 +24,38 @@ Everything stays on your machine: no account, no backend, no network requests.
 3. Click **Load unpacked** and select the **`extension`** folder in this repository (`task-reminder-extension/extension`), not the repository root.
 4. Click the puzzle-piece icon in the toolbar and pin **Task Reminder**.
 
-Tabs that were already open when you install get the bar without a refresh.
+Tabs that were already open when you install get the widget without a refresh.
 
-Optional: to show the bar on local `file://` pages, open the extension's **Details** and enable **Allow access to file URLs**.
+Optional: to show the widget on local `file://` pages, open the extension's **Details** and enable **Allow access to file URLs**.
 
 ### Updating after code changes
 
-Click the reload arrow on the Task Reminder card in `chrome://extensions`. There's no need to remove and re-add it.
+Click the reload arrow on the Task Reminder card in `chrome://extensions`. There's no need to remove and re-add it. Refresh any tab that still shows a leftover copy from the previous version.
 
 ## Usage
 
 | Action | How |
 | --- | --- |
-| Start a task | Click the toolbar icon, type the task, press Enter or **Start** |
-| Rename the task | Click the bar → **Edit task**, or rename it in the popup and click **Update** |
-| Complete the task | Click the bar → **Complete task**, or **Complete task** in the popup |
-| Move the bar | Drag it (or the collapsed dot) |
-| Reset the position | Click the bar → **Reset position** |
-| Collapse / expand | Click the bar → **Collapse**; click the dot to expand (or **Show bar on pages** in the popup) |
-| Close the menu | Press Esc or click anywhere else on the page |
+| Add a task | Click the bar (or the empty marker), type in **Add a task**, press Enter |
+| Edit a task | In the panel: ✎, or double-click the title |
+| Reorder | ↑ / ↓ next to a task. The top one is always "Working on" |
+| Complete the current task | ✓ on the first row. The next task in line becomes current |
+| Remove a queued task | ✕ on that row (the current task is completed, not removed) |
+| Move the widget | Drag the bar or the collapsed marker |
+| Reset the position | **Reset position** at the bottom of the panel |
+| Collapse / expand | **Collapse** in the panel; click the dot to expand |
+| Show or hide on pages | Toolbar icon → **Show widget on pages** |
+| Close the panel | Press Esc or click anywhere else on the page |
 
 ## Project layout
 
 ```
 extension/              # The unpacked extension that Chrome loads
   manifest.json
-  store.js              # Task state in chrome.storage (shared by popup, page script, service worker)
-  content.js            # The floating bar (Shadow DOM, isolated from page styles)
-  popup.html/.css/.js   # Toolbar popup
-  service-worker.js     # Toolbar badge; injects the bar into already-open tabs on install
+  store.js              # Queue state in chrome.storage (shared by popup, page script, service worker)
+  content.js            # The floating widget (Shadow DOM, isolated from page styles)
+  popup.html/.css/.js   # Toolbar popup: on/off + current-task glance
+  service-worker.js     # Toolbar badge; injects the widget into already-open tabs on install
   icons/
 scripts/make-icons.mjs  # Regenerates the icon PNGs (no dependencies)
 tests/e2e.test.mjs      # End-to-end tests
@@ -71,14 +74,18 @@ npm test
 
 What's covered:
 
-- No task: pages show nothing and the popup shows the empty state; empty task names are rejected.
-- Starting a task from the popup shows the bar in two open tabs and in a newly opened tab, and sets the toolbar badge.
+- No tasks: pages show the empty marker; the popup shows the empty state with the widget on.
+- The empty marker opens the panel ready to add; completing the last task returns to it.
+- Adding a task shows the bar in two open tabs and in a newly opened tab, and sets the toolbar badge.
 - After scrolling 3000px the bar is still 12px from the top and right edges.
-- Renaming in tab A updates tab B and the popup; typing in the bar's editor doesn't trigger the page's own keyboard handlers.
-- Esc and clicking elsewhere close the menu.
-- Dragging moves the bar without opening the menu, saves the position and moves it in other tabs; a plain click still opens the menu afterwards.
-- The bar can't be dragged out of the viewport, and the open menu stays on screen near the bottom edge.
-- Collapsing in tab B collapses tab A, the dot keeps the dragged position, and clicking it expands both.
-- Reloading a page keeps the task and position; **Reset position** returns the bar to the corner in every tab.
-- Completing from the bar or the popup hides it everywhere and clears the badge.
-- The task and position survive closing and relaunching the browser with the same profile.
+- Tasks added from the widget queue behind the current one; a `+N` chip appears on every tab.
+- Editing, reordering, completing and removing sync across tabs. Escape cancels an edit, then closes the panel.
+- Dragging moves the widget without opening the panel; a plain click still opens it afterwards.
+- The widget can't leave the viewport, and the open panel stays on screen near the bottom edge.
+- Collapsing in one tab collapses the others; the dot keeps the dragged position.
+- Reloading a page keeps the queue and position; **Reset position** returns the widget to the corner everywhere.
+- Completing the last task returns every tab to the empty marker.
+- Turning the widget off in the popup hides it on every tab without clearing the queue; turning it on restores it.
+- The queue and position survive closing and relaunching the browser with the same profile.
+- Reloading the extension leaves exactly one widget in already-open tabs.
+- A single task saved by 0.2.x is migrated into the queue.
